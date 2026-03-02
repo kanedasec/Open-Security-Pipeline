@@ -10,9 +10,9 @@ api_json() {
 
   local response
   if [[ -n "$payload" ]]; then
-    response="$(curl -sS -X "$method" "$url" -H "X-Api-Key: $api_key" -H "Content-Type: application/json" -d "$payload" -w '\n%{http_code}')"
+    response="$(curl -sSL -X "$method" "$url" -H "X-Api-Key: $api_key" -H "Content-Type: application/json" -d "$payload" -w '\n%{http_code}')"
   else
-    response="$(curl -sS -X "$method" "$url" -H "X-Api-Key: $api_key" -H "Content-Type: application/json" -w '\n%{http_code}')"
+    response="$(curl -sSL -X "$method" "$url" -H "X-Api-Key: $api_key" -H "Content-Type: application/json" -w '\n%{http_code}')"
   fi
 
   local status
@@ -58,7 +58,9 @@ create_or_reuse_project() {
     die "Unexpected error creating project"
   fi
 
-  body="$(curl -sS "$dt_url/api/v1/project/lookup?name=$(printf '%s' "$project_name" | sed 's/ /%20/g')&version=$(printf '%s' "$project_version" | sed 's/ /%20/g')" -H "X-Api-Key: $dt_api_key" -H "Content-Type: application/json")"
+  local lookup_url
+  lookup_url="$dt_url/api/v1/project/lookup?name=$(url_encode "$project_name")&version=$(url_encode "$project_version")"
+  body="$(api_json GET "$lookup_url" "$dt_api_key")"
   local project_uuid
   project_uuid="$(jq -r '.uuid // ""' <<<"$body")"
   [[ -n "$project_uuid" ]] || die "Dependency-Track returned 409 but lookup did not return uuid"
@@ -104,7 +106,7 @@ download_export() {
   local output_path="$4"
 
   local body
-  body="$(curl -sS "$dt_url/api/v1/finding/project/$project_uuid/export" -H "X-Api-Key: $dt_api_key" -H "Content-Type: application/json")"
+  body="$(api_json GET "$dt_url/api/v1/finding/project/$project_uuid/export" "$dt_api_key")"
   printf '%s\n' "$body" | jq . > "$output_path"
 
   echo "Findings exported successfully"

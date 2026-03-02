@@ -7,9 +7,10 @@ load_dotenv() {
   [[ -f "$file" ]] || return 0
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-      local key="${BASH_REMATCH[1]}"
-      local val="${BASH_REMATCH[2]}"
+    if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+      local key="${BASH_REMATCH[2]}"
+      local val="${BASH_REMATCH[3]}"
+      val="$(sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' <<<"$val")"
       val="${val%\"}"; val="${val#\"}"
       val="${val%\'}"; val="${val#\'}"
       export "$key=$val"

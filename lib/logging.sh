@@ -25,3 +25,8 @@ require_bin() {
   local bin="$1"
   command -v "$bin" >/dev/null 2>&1 || die "Required binary not found in PATH: $bin"
 }
+
+url_encode() {
+  local value="$1"
+  jq -rn --arg v "$value" '$v|@uri'
+}

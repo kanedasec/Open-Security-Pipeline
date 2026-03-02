@@ -21,10 +21,11 @@ dj_request() {
   body="$(sed '$d' <<<"$response")"
 
   if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
-    echo "$body" >&2
+    echo "DefectDojo API error ($status): ${body:0:2000}" >&2
     return 1
   fi
 
+  jq -e . >/dev/null <<<"$body" || die "DefectDojo API returned non-JSON payload for $method $url"
   printf '%s' "$body"
 }
 
@@ -35,7 +36,7 @@ resolve_engagement_id() {
   local engagement_name="$4"
 
   local payload
-  payload="$(dj_request GET "$dj_url/api/v2/engagements/?name=$(printf '%s' "$engagement_name" | sed 's/ /%20/g')&product_name=$(printf '%s' "$product_name" | sed 's/ /%20/g')&limit=1&offset=0&ordering=-id" "$dj_api_key")"
+  payload="$(dj_request GET "$dj_url/api/v2/engagements/?name=$(url_encode "$engagement_name")&product_name=$(url_encode "$product_name")&limit=1&offset=0&ordering=-id" "$dj_api_key")"
   jq -r '.results[0].id // ""' <<<"$payload"
 }
 

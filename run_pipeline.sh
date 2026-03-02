@@ -44,8 +44,6 @@ main() {
     log_event "INFO" "Scan tags: $scan_tags"
   fi
 
-  local dt_test_id=""
-  local sast_test_id=""
   local dt_response=""
   local sast_response=""
 
@@ -54,12 +52,11 @@ main() {
 
   log_step "SCA_IMPORT_DEFECTDOJO"
   log_call "upload_dt_to_dj"
-  dt_response="$(upload_dt_to_dj "$DJ_URL" "$DJ_API_KEY" "$DT_FINDINGS_PATH" "$PRODUCT_NAME" "$PRODUCT_TYPE_NAME" "$ENGAGEMENT_NAME" "$version" "$scan_tags" "$dt_test_id")"
+  dt_response="$(upload_dt_to_dj "$DJ_URL" "$DJ_API_KEY" "$DT_FINDINGS_PATH" "$PRODUCT_NAME" "$PRODUCT_TYPE_NAME" "$ENGAGEMENT_NAME" "$version" "$scan_tags" "")"
   local resolved_dt_test_id
   resolved_dt_test_id="$(extract_test_id "$dt_response")"
   if [[ -n "$resolved_dt_test_id" ]]; then
-    dt_test_id="$resolved_dt_test_id"
-    log_event "INFO" "DT stable test ID: $dt_test_id"
+    log_event "INFO" "DT test ID: $resolved_dt_test_id"
   fi
 
   local sast_scan_type=""
@@ -70,12 +67,11 @@ main() {
 
     log_step "DEFECTDOJO_IMPORT_SAST"
     log_call "upload_sast_to_dj"
-    sast_response="$(upload_sast_to_dj "$DJ_URL" "$DJ_API_KEY" "$SAST_REPORT_PATH" "$PRODUCT_NAME" "$PRODUCT_TYPE_NAME" "$ENGAGEMENT_NAME" "$version" "$sast_scan_type" "$DJ_UPLOAD_TIMEOUT" "$DJ_UPLOAD_RETRIES" "$DJ_UPLOAD_RETRY_DELAY" "$scan_tags" "$sast_test_id")"
+    sast_response="$(upload_sast_to_dj "$DJ_URL" "$DJ_API_KEY" "$SAST_REPORT_PATH" "$PRODUCT_NAME" "$PRODUCT_TYPE_NAME" "$ENGAGEMENT_NAME" "$version" "$sast_scan_type" "$DJ_UPLOAD_TIMEOUT" "$DJ_UPLOAD_RETRIES" "$DJ_UPLOAD_RETRY_DELAY" "$scan_tags" "")"
     local resolved_sast_test_id
     resolved_sast_test_id="$(extract_test_id "$sast_response")"
     if [[ -n "$resolved_sast_test_id" ]]; then
-      sast_test_id="$resolved_sast_test_id"
-      log_event "INFO" "SAST stable test ID: $sast_test_id"
+      log_event "INFO" "SAST test ID: $resolved_sast_test_id"
     fi
   fi
 
