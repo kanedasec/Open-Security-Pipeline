@@ -61,7 +61,7 @@ parse_args() {
 
   REPORT_OUTPUT_DIR="${REPORT_OUTPUT_DIR:-$repo_root/tmp/reports}"
   REPORT_LANGUAGE="${REPORT_LANGUAGE:-pt-BR}"
-  SKIP_DEFECTDOJO_REPORT="false"
+  SKIP_DEFECTDOJO_REPORT="${SKIP_DEFECTDOJO_REPORT:-true}"
 
   BYPASS="false"
   CLEANUP_JSON="false"
@@ -97,6 +97,7 @@ parse_args() {
       --dj-upload-retry-delay) DJ_UPLOAD_RETRY_DELAY="$2"; shift 2 ;;
       --report-output-dir) REPORT_OUTPUT_DIR="$2"; shift 2 ;;
       --report-language) REPORT_LANGUAGE="$2"; shift 2 ;;
+      --defectdojo-report|--enable-defectdojo-report) SKIP_DEFECTDOJO_REPORT="false"; shift ;;
       --skip-defectdojo-report) SKIP_DEFECTDOJO_REPORT="true"; shift ;;
       --by-pass|--bypass) BYPASS="true"; shift ;;
       --cleanup-json) CLEANUP_JSON="true"; shift ;;

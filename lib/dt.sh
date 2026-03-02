@@ -30,6 +30,46 @@ api_json() {
   printf '%s\n' "$body"
 }
 
+wait_for_bom_processing() {
+  local dt_url="$1"
+  local dt_api_key="$2"
+  local task_token="$3"
+  local max_wait_seconds="$4"
+
+  [[ -z "$task_token" ]] && return 0
+  [[ "$max_wait_seconds" -le 0 ]] && return 0
+
+  local poll_interval=5
+  local elapsed=0
+  while [[ "$elapsed" -lt "$max_wait_seconds" ]]; do
+    local status_payload
+    if status_payload="$(api_json GET "$dt_url/api/v1/bom/token/$task_token" "$dt_api_key" 2>/dev/null)"; then
+      local processing
+      processing="$(jq -r '
+        if has("processing") then (.processing|tostring)
+        elif has("isProcessing") then (.isProcessing|tostring)
+        elif has("processed") then ((.processed|not)|tostring)
+        else "unknown"
+        end
+      ' <<<"$status_payload")"
+
+      if [[ "$processing" == "false" ]]; then
+        log_event "INFO" "Dependency-Track BOM task finished (token=$task_token)"
+        return 0
+      fi
+      if [[ "$processing" == "unknown" ]]; then
+        log_event "WARN" "Dependency-Track BOM status shape unknown; falling back to fixed wait/export"
+        return 0
+      fi
+    fi
+
+    sleep "$poll_interval"
+    elapsed=$((elapsed + poll_interval))
+  done
+
+  log_event "WARN" "Dependency-Track BOM task polling timed out after ${max_wait_seconds}s (token=$task_token)"
+}
+
 create_or_reuse_project() {
   local dt_url="$1"
   local dt_api_key="$2"
@@ -85,18 +125,34 @@ upload_sbom() {
   local project_uuid="$3"
   local sbom_path="$4"
 
-  local bom_b64
-  bom_b64="$(base64 -w0 "$sbom_path")"
-  local payload
-  payload="$(jq -n --arg project "$project_uuid" --arg bom "$bom_b64" '{project: $project, bom: $bom}')"
+  local payload_file
+  payload_file="$(mktemp)"
+  {
+    printf '{"project":"%s","bom":"' "$project_uuid"
+    base64 -w0 "$sbom_path"
+    printf '"}'
+  } > "$payload_file"
 
   local response
-  response="$(api_json PUT "$dt_url/api/v1/bom" "$dt_api_key" "$payload")"
+  response="$(curl -sSL -X PUT "$dt_url/api/v1/bom" \
+    -H "X-Api-Key: $dt_api_key" \
+    -H "Content-Type: application/json" \
+    --data-binary "@$payload_file" \
+    -w '\n%{http_code}')"
+  rm -f "$payload_file"
+
+  local status body
+  status="$(tail -n1 <<<"$response")"
+  body="$(sed '$d' <<<"$response")"
+  if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+    die "Dependency-Track API error ($status): ${body:0:2000}"
+  fi
 
   echo "SBOM uploaded successfully"
   local task_token
-  task_token="$(jq -r '.token // ""' <<<"$response")"
+  task_token="$(jq -r '.token // ""' <<<"$body")"
   [[ -n "$task_token" ]] && echo "Dependency-Track task token: $task_token"
+  printf '%s\n' "$task_token"
 }
 
 download_export() {
@@ -136,13 +192,24 @@ run_dependency_track_sca() {
   generate_sbom_from_requirements "$requirements_path" "$sbom_path"
 
   log_call "upload_sbom"
-  upload_sbom "$dt_url" "$dt_api_key" "$project_uuid" "$sbom_path"
+  local dt_task_token
+  dt_task_token="$(upload_sbom "$dt_url" "$dt_api_key" "$project_uuid" "$sbom_path" | tail -n1)"
 
   if [[ "$wait_after_sbom_seconds" -gt 0 ]]; then
     log_event "WAIT" "Waiting ${wait_after_sbom_seconds}s for Dependency-Track analysis"
-    sleep "$wait_after_sbom_seconds"
+    if [[ -n "$dt_task_token" ]]; then
+      wait_for_bom_processing "$dt_url" "$dt_api_key" "$dt_task_token" "$wait_after_sbom_seconds"
+    else
+      sleep "$wait_after_sbom_seconds"
+    fi
   fi
 
   log_call "download_export"
   download_export "$dt_url" "$dt_api_key" "$project_uuid" "$findings_output_path"
+
+  local findings_count
+  findings_count="$(jq -r '(.findings // []) | length' "$findings_output_path" 2>/dev/null || echo "0")"
+  if [[ "$findings_count" == "0" ]]; then
+    log_event "WARN" "Dependency-Track export returned 0 findings. Check DT vulnerability data sync/analyzers."
+  fi
 }

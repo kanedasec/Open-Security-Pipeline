@@ -87,6 +87,12 @@ main() {
     [[ -n "$tid" ]] && current_test_ids+=("$tid")
   fi
 
+  local current_test_ids_csv=""
+  if [[ ${#current_test_ids[@]} -gt 0 ]]; then
+    local IFS=,
+    current_test_ids_csv="${current_test_ids[*]}"
+  fi
+
   local engagement_id="$ENGAGEMENT_ID"
   if [[ -z "$engagement_id" && -n "$dt_response" ]]; then
     engagement_id="$(extract_engagement_id "$dt_response")"
@@ -110,7 +116,7 @@ main() {
   log_step "DEFECTDOJO_FETCH_FINDINGS"
   log_call "fetch_open_findings"
   local findings_json
-  findings_json="$(fetch_open_findings "$DJ_URL" "$DJ_API_KEY" "$engagement_id" "${current_test_ids[*]:-}")"
+  findings_json="$(fetch_open_findings "$DJ_URL" "$DJ_API_KEY" "$engagement_id" "$current_test_ids_csv")"
 
   log_step "DEFECTDOJO_GATE"
   log_call "fetch_test_metadata"
@@ -131,12 +137,18 @@ main() {
     log_call "generate_defectdojo_engagement_report"
     local report_payload
     report_payload="$(generate_defectdojo_engagement_report "$DJ_URL" "$DJ_API_KEY" "$engagement_id" "$REPORT_LANGUAGE")"
+    local report_failed
+    report_failed="$(jq -r '(.report_request_failed // false)' <<<"$report_payload" 2>/dev/null || echo "false")"
+    if [[ "$report_failed" == "true" ]]; then
+      log_event "WARN" "DefectDojo engagement report request failed or timed out"
+    else
     local report_task
     report_task="$(jq -r '(.task_id // .id // "")' <<<"$report_payload")"
     if [[ -n "$report_task" ]]; then
       log_event "INFO" "DefectDojo engagement report generation started (task=$report_task)"
     else
       log_event "INFO" "DefectDojo engagement report generation requested"
+    fi
     fi
   fi
 
