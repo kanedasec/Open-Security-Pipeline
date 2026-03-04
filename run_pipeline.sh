@@ -5,26 +5,26 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# shellcheck source=lib/logging.sh
-source "$SCRIPT_DIR/lib/logging.sh"
-# shellcheck source=lib/state.sh
-source "$SCRIPT_DIR/lib/state.sh"
-# shellcheck source=lib/config.sh
-source "$SCRIPT_DIR/lib/config.sh"
-# shellcheck source=lib/dt.sh
-source "$SCRIPT_DIR/lib/dt.sh"
-# shellcheck source=lib/dj.sh
-source "$SCRIPT_DIR/lib/dj.sh"
-# shellcheck source=lib/sast.sh
-source "$SCRIPT_DIR/lib/sast.sh"
-# shellcheck source=lib/secrets.sh
-source "$SCRIPT_DIR/lib/secrets.sh"
-# shellcheck source=lib/gate.sh
-source "$SCRIPT_DIR/lib/gate.sh"
-# shellcheck source=lib/reporting.sh
-source "$SCRIPT_DIR/lib/reporting.sh"
-# shellcheck source=lib/cleanup.sh
-source "$SCRIPT_DIR/lib/cleanup.sh"
+# shellcheck source=scripts/logging.sh
+source "$SCRIPT_DIR/scripts/logging.sh"
+# shellcheck source=scripts/state.sh
+source "$SCRIPT_DIR/scripts/state.sh"
+# shellcheck source=scripts/config.sh
+source "$SCRIPT_DIR/scripts/config.sh"
+# shellcheck source=scripts/dt.sh
+source "$SCRIPT_DIR/scripts/dt.sh"
+# shellcheck source=scripts/dj.sh
+source "$SCRIPT_DIR/scripts/dj.sh"
+# shellcheck source=scripts/sast.sh
+source "$SCRIPT_DIR/scripts/sast.sh"
+# shellcheck source=scripts/secrets.sh
+source "$SCRIPT_DIR/scripts/secrets.sh"
+# shellcheck source=scripts/gate.sh
+source "$SCRIPT_DIR/scripts/gate.sh"
+# shellcheck source=scripts/reporting.sh
+source "$SCRIPT_DIR/scripts/reporting.sh"
+# shellcheck source=scripts/cleanup.sh
+source "$SCRIPT_DIR/scripts/cleanup.sh"
 
 main() {
   parse_args "$SCRIPT_DIR" "$@"
