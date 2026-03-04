@@ -207,11 +207,11 @@ fetch_open_findings() {
   local page_count=0
   local started_at
   started_at="$(date +%s)"
+  local normalized_test_ids_csv=""
 
   local base_url
   base_url="$dj_url/api/v2/findings/?test__engagement=$engagement_id&active=true&is_mitigated=false&duplicate=false&false_p=false&limit=$limit"
   if [[ -n "${test_ids_csv// }" ]]; then
-    local normalized_test_ids_csv
     normalized_test_ids_csv="$(tr ' ' ',' <<<"$test_ids_csv" | sed 's/,,*/,/g; s/^,//; s/,$//')"
     base_url+="&test__in=$(url_encode "$normalized_test_ids_csv")"
   fi
@@ -235,6 +235,12 @@ fetch_open_findings() {
 
   local finished_at
   finished_at="$(date +%s)"
+  if [[ -n "$normalized_test_ids_csv" ]]; then
+    output="$(jq -c --arg ids "$normalized_test_ids_csv" '
+      ($ids | split(",") | map(tonumber? // empty)) as $allowed
+      | map(select((.test // -1) as $t | any($allowed[]; . == $t)))
+    ' <<<"$output")"
+  fi
   local total_count
   total_count="$(jq 'length' <<<"$output")"
   log_event "INFO" "DefectDojo findings fetch completed: pages=$page_count findings=$total_count seconds=$((finished_at - started_at))" >&2

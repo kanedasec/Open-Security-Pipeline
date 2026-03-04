@@ -109,14 +109,72 @@ create_or_reuse_project() {
   printf '%s\n' "$project_uuid"
 }
 
-generate_sbom_from_requirements() {
-  local requirements_path="$1"
-  local sbom_output_path="$2"
+normalize_sca_language() {
+  local language="$1"
+  local normalized
+  normalized="$(tr '[:upper:]' '[:lower:]' <<<"$language")"
 
-  require_bin cyclonedx-py
-  log_event "INFO" "SBOM command: cyclonedx-py requirements $requirements_path --of JSON -o $sbom_output_path"
-  cyclonedx-py requirements "$requirements_path" --of JSON -o "$sbom_output_path"
+  case "$normalized" in
+    python) printf 'python\n' ;;
+    java) printf 'java\n' ;;
+    javascript|js|node) printf 'javascript\n' ;;
+    *) die "Unsupported SCA language '$language'. Supported: python, java, javascript" ;;
+  esac
+}
+
+generate_sbom() {
+  local sca_language="$1"
+  local manifest_path="$2"
+  local sbom_output_path="$3"
+
+  local language
+  language="$(normalize_sca_language "$sca_language")"
+  mkdir -p "$(dirname "$sbom_output_path")"
+
+  case "$language" in
+    python)
+      require_bin cyclonedx-py
+      log_event "INFO" "SBOM command: cyclonedx-py requirements $manifest_path --of JSON -o $sbom_output_path"
+      cyclonedx-py requirements "$manifest_path" --of JSON -o "$sbom_output_path"
+      ;;
+    java)
+      require_bin mvn
+      local manifest_dir
+      manifest_dir="$(dirname "$manifest_path")"
+      local output_name
+      output_name="$(basename "$sbom_output_path" .json)"
+      log_event "INFO" "SBOM command: mvn cyclonedx-maven-plugin (dir=$manifest_dir output=$sbom_output_path)"
+      (
+        cd "$manifest_dir"
+        mvn -q -DskipTests \
+          org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom \
+          -DoutputFormat=json \
+          -DoutputName="$output_name" \
+          -DoutputDirectory="$(dirname "$sbom_output_path")"
+      )
+      ;;
+    javascript)
+      require_bin cyclonedx-npm
+      local manifest_dir
+      manifest_dir="$(dirname "$manifest_path")"
+      log_event "INFO" "SBOM command: cyclonedx-npm --output-file $sbom_output_path --output-format JSON (dir=$manifest_dir)"
+      (
+        cd "$manifest_dir"
+        cyclonedx-npm --output-file "$sbom_output_path" --output-format JSON
+      )
+      ;;
+  esac
+
   [[ -f "$sbom_output_path" ]] || die "SBOM file not generated: $sbom_output_path"
+}
+
+base64_encode_file() {
+  local path="$1"
+  if base64 --help 2>/dev/null | grep -q -- '-w'; then
+    base64 -w 0 "$path"
+  else
+    base64 "$path" | tr -d '\n'
+  fi
 }
 
 upload_sbom() {
@@ -129,7 +187,7 @@ upload_sbom() {
   payload_file="$(mktemp)"
   {
     printf '{"project":"%s","bom":"' "$project_uuid"
-    base64 -w0 "$sbom_path"
+    base64_encode_file "$sbom_path"
     printf '"}'
   } > "$payload_file"
 
@@ -169,16 +227,73 @@ download_export() {
   echo "Written to: $output_path"
 }
 
+fetch_export_count() {
+  local dt_url="$1"
+  local dt_api_key="$2"
+  local project_uuid="$3"
+
+  local body
+  body="$(api_json GET "$dt_url/api/v1/finding/project/$project_uuid/export" "$dt_api_key")"
+  jq -r 'if type=="array" then length else (.findings // []) | length end' <<<"$body" 2>/dev/null || echo "0"
+}
+
+wait_for_export_stabilization() {
+  local dt_url="$1"
+  local dt_api_key="$2"
+  local project_uuid="$3"
+  local required_equal_polls="$4"
+  local interval_seconds="$5"
+  local timeout_seconds="$6"
+
+  if [[ "$required_equal_polls" -le 1 ]]; then
+    return 0
+  fi
+  if [[ "$interval_seconds" -le 0 || "$timeout_seconds" -le 0 ]]; then
+    return 0
+  fi
+
+  local elapsed=0
+  local stable_count=0
+  local last_count=""
+
+  while [[ "$elapsed" -lt "$timeout_seconds" ]]; do
+    local count
+    count="$(fetch_export_count "$dt_url" "$dt_api_key" "$project_uuid")"
+    log_event "INFO" "Dependency-Track export count probe: findings=$count stable_polls=$stable_count/${required_equal_polls}"
+
+    if [[ "$count" == "$last_count" ]]; then
+      stable_count=$((stable_count + 1))
+    else
+      stable_count=1
+      last_count="$count"
+    fi
+
+    if [[ "$stable_count" -ge "$required_equal_polls" ]]; then
+      log_event "INFO" "Dependency-Track export stabilized at findings=$count (${stable_count} consecutive probes)"
+      return 0
+    fi
+
+    sleep "$interval_seconds"
+    elapsed=$((elapsed + interval_seconds))
+  done
+
+  log_event "WARN" "Dependency-Track export stabilization timed out after ${timeout_seconds}s; continuing with latest export snapshot"
+}
+
 run_dependency_track_sca() {
   local dt_url="$1"
   local dt_api_key="$2"
   local project_name="$3"
   local engagement_name="$4"
   local version="$5"
-  local requirements_path="$6"
-  local sbom_path="$7"
-  local findings_output_path="$8"
-  local wait_after_sbom_seconds="$9"
+  local sca_language="$6"
+  local manifest_path="$7"
+  local sbom_path="$8"
+  local findings_output_path="$9"
+  local wait_after_sbom_seconds="${10}"
+  local export_stability_polls="${11:-3}"
+  local export_stability_interval_seconds="${12:-10}"
+  local export_stability_timeout_seconds="${13:-180}"
 
   log_step "SCA_DEPENDENCY_TRACK"
   local dt_project_version="${engagement_name}-${version}"
@@ -188,8 +303,8 @@ run_dependency_track_sca() {
   local project_uuid
   project_uuid="$(create_or_reuse_project "$dt_url" "$dt_api_key" "$project_name" "$dt_project_version" | tail -n1)"
 
-  log_call "generate_sbom_from_requirements"
-  generate_sbom_from_requirements "$requirements_path" "$sbom_path"
+  log_call "generate_sbom"
+  generate_sbom "$sca_language" "$manifest_path" "$sbom_path"
 
   log_call "upload_sbom"
   local dt_task_token
@@ -204,11 +319,16 @@ run_dependency_track_sca() {
     fi
   fi
 
+  if [[ "$export_stability_polls" -gt 1 ]]; then
+    log_call "wait_for_export_stabilization"
+    wait_for_export_stabilization "$dt_url" "$dt_api_key" "$project_uuid" "$export_stability_polls" "$export_stability_interval_seconds" "$export_stability_timeout_seconds"
+  fi
+
   log_call "download_export"
   download_export "$dt_url" "$dt_api_key" "$project_uuid" "$findings_output_path"
 
   local findings_count
-  findings_count="$(jq -r '(.findings // []) | length' "$findings_output_path" 2>/dev/null || echo "0")"
+  findings_count="$(jq -r 'if type=="array" then length else (.findings // []) | length end' "$findings_output_path" 2>/dev/null || echo "0")"
   if [[ "$findings_count" == "0" ]]; then
     log_event "WARN" "Dependency-Track export returned 0 findings. Check DT vulnerability data sync/analyzers."
   fi
